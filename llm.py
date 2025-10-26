@@ -6,21 +6,19 @@ from langchain_openai import ChatOpenAI
 from langchain_openai import OpenAIEmbeddings
 from langchain_pinecone import PineconeVectorStore
 
-def get_ai_response(user_message):
+def get_retriever():
     embedding = OpenAIEmbeddings(model='text-embedding-3-large')
     index_name = 'tax-index'
     database = PineconeVectorStore.from_existing_index(index_name=index_name, embedding=embedding)
-
-    llm = ChatOpenAI(model='gpt-4o')
-    prompt = hub.pull("rlm/rag-prompt")
     retriever = database.as_retriever(search_kwargs={'k': 4})
+    return retriever
 
-    qa_chain = RetrievalQA.from_chain_type(
-        llm=llm, 
-        retriever=retriever, 
-        chain_type_kwargs={"prompt": prompt}
-    )
 
+def get_llm(model='gpt-4o'):
+    llm = ChatOpenAI(model=model)
+    return llm
+
+def get_dictionary_chain():
     dictionary = ["사람을 나타내는 표현 -> 거주자"]
     prompt = ChatPromptTemplate.from_template(f"""
         사용자의 질문을 보고, 우리의 사전을 참고해서 사용자의 질문을 변경해주세요.
@@ -30,8 +28,26 @@ def get_ai_response(user_message):
         
         질문: {{question}}
     """)
-
+    llm = get_llm()
     dictionary_chain = prompt | llm | StrOutputParser()
+    return dictionary_chain
+
+def get_qa_chain():
+    llm = get_llm()
+    prompt = hub.pull("rlm/rag-prompt")
+    retriever=get_retriever()
+
+    qa_chain = RetrievalQA.from_chain_type(
+        llm=llm, 
+        retriever=retriever, 
+        chain_type_kwargs={"prompt": prompt}
+    )
+    return qa_chain
+
+
+def get_ai_response(user_message):
+    dictionary_chain = get_dictionary_chain()
+    qa_chain = get_qa_chain()
     tax_chain = {"query":dictionary_chain} | qa_chain
     ai_message = tax_chain.invoke({"question":user_message})
     return ai_message["result"]
